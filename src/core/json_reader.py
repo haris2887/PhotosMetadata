@@ -25,8 +25,10 @@ class GoogleJsonReader:
         parent = photo_path.parent
 
         candidates: list[Path] = [
-            parent / f"{name}.json",   # IMG_0042.jpg.json  (most common)
-            parent / f"{stem}.json",   # IMG_0042.json
+            parent / f"{name}.json",                          # IMG_0042.jpg.json  (classic)
+            parent / f"{name}.supplemental-metadata.json",    # IMG_0042.jpg.supplemental-metadata.json (newer Takeout)
+            parent / f"{stem}.json",                          # IMG_0042.json
+            parent / f"{stem}.supplemental-metadata.json",    # IMG_0042.supplemental-metadata.json
         ]
 
         # Google appends (N) to the stem of duplicate filenames (e.g. IMG_0042(1).jpg)
@@ -34,8 +36,10 @@ class GoogleJsonReader:
         if clean_stem != stem:
             clean_name = clean_stem + photo_path.suffix   # IMG_0042.jpg
             candidates += [
-                parent / f"{clean_name}.json",            # IMG_0042.jpg.json
-                parent / f"{clean_stem}.json",            # IMG_0042.json
+                parent / f"{clean_name}.json",
+                parent / f"{clean_name}.supplemental-metadata.json",
+                parent / f"{clean_stem}.json",
+                parent / f"{clean_stem}.supplemental-metadata.json",
             ]
 
         for candidate in candidates:

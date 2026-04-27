@@ -59,6 +59,40 @@ class TestFindJson:
         sidecar.touch()
         assert reader.find_json(photo) == sidecar
 
+    def test_finds_supplemental_metadata_sidecar(self, tmp_path: Path,
+                                                  reader: GoogleJsonReader) -> None:
+        photo = tmp_path / "IMG-20180713-WA0001.jpg"
+        photo.touch()
+        sidecar = tmp_path / "IMG-20180713-WA0001.jpg.supplemental-metadata.json"
+        sidecar.touch()
+        assert reader.find_json(photo) == sidecar
+
+    def test_finds_stem_supplemental_metadata_sidecar(self, tmp_path: Path,
+                                                       reader: GoogleJsonReader) -> None:
+        photo = tmp_path / "IMG-20180713-WA0001.jpg"
+        photo.touch()
+        sidecar = tmp_path / "IMG-20180713-WA0001.supplemental-metadata.json"
+        sidecar.touch()
+        assert reader.find_json(photo) == sidecar
+
+    def test_prefers_classic_json_over_supplemental(self, tmp_path: Path,
+                                                     reader: GoogleJsonReader) -> None:
+        photo = tmp_path / "IMG_0042.jpg"
+        photo.touch()
+        classic = tmp_path / "IMG_0042.jpg.json"
+        supplemental = tmp_path / "IMG_0042.jpg.supplemental-metadata.json"
+        classic.touch()
+        supplemental.touch()
+        assert reader.find_json(photo) == classic
+
+    def test_finds_supplemental_for_duplicate_filename(self, tmp_path: Path,
+                                                        reader: GoogleJsonReader) -> None:
+        photo = tmp_path / "IMG_0042(1).jpg"
+        photo.touch()
+        sidecar = tmp_path / "IMG_0042.jpg.supplemental-metadata.json"
+        sidecar.touch()
+        assert reader.find_json(photo) == sidecar
+
 
 class TestReadDate:
     def test_reads_photo_taken_time(self, tmp_path: Path,

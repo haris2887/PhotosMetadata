@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -58,6 +59,14 @@ class SettingsDialog(QDialog):
         self._date_format.addItems(["Ask me each time", "Day/Month/Year (DMY)", "Month/Day/Year (MDY)"])
         form.addRow("Ambiguous date format:", self._date_format)
 
+        # Backup option
+        self._create_backup = QCheckBox("Create _original backup files when writing dates")
+        self._create_backup.setToolTip(
+            "When enabled, ExifTool saves the original file as filename_original before\n"
+            "writing. Disable this to save disk space — changes cannot be undone."
+        )
+        form.addRow("Backups:", self._create_backup)
+
         root.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -86,11 +95,13 @@ class SettingsDialog(QDialog):
         s = load_settings()
         self._et_path.setText(s.value("exiftool_path", ""))
         self._date_format.setCurrentIndex(int(s.value("date_format_pref", 0)))
+        self._create_backup.setChecked(s.value("create_backup", True, type=bool))
 
     def _save_and_accept(self) -> None:
         s = load_settings()
         s.setValue("exiftool_path", self._et_path.text().strip())
         s.setValue("date_format_pref", self._date_format.currentIndex())
+        s.setValue("create_backup", self._create_backup.isChecked())
         self.accept()
 
     @staticmethod
@@ -101,3 +112,8 @@ class SettingsDialog(QDialog):
     def date_format_pref() -> int:
         """0=ask, 1=DMY, 2=MDY"""
         return int(load_settings().value("date_format_pref", 0))
+
+    @staticmethod
+    def create_backup() -> bool:
+        """True = create _original backup (default); False = overwrite in place."""
+        return load_settings().value("create_backup", True, type=bool)

@@ -1,5 +1,5 @@
-# Setup script for PhotosMetadata — Windows (PowerShell)
-# Can be run from anywhere — it always operates from the project root.
+﻿# Setup script for PhotosMetadata - Windows (PowerShell)
+# Can be run from anywhere - it always operates from the project root.
 #
 # Requirements:
 #   - PowerShell 5.1+ (built into Windows 10/11) or PowerShell 7+
@@ -9,13 +9,13 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Always work from the project root (one level above this script) ───────────
+# Always work from the project root (one level above this script)
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
 Write-Host "Setting up PhotosMetadata project..." -ForegroundColor Cyan
 
-# ── Check Python ─────────────────────────────────────────────────────────────
+# Check Python
 $pythonCmd = $null
 foreach ($cmd in @("python3.12", "python3", "python")) {
     if (Get-Command $cmd -ErrorAction SilentlyContinue) {
@@ -39,7 +39,7 @@ if (-not $pythonCmd) {
     exit 1
 }
 
-# ── Check ExifTool ────────────────────────────────────────────────────────────
+# Check ExifTool
 if (-not (Get-Command "exiftool" -ErrorAction SilentlyContinue)) {
     Write-Host ""
     Write-Host "WARNING: ExifTool not found in PATH." -ForegroundColor Yellow
@@ -56,20 +56,20 @@ if (-not (Get-Command "exiftool" -ErrorAction SilentlyContinue)) {
     Write-Host "Found: ExifTool $etVersion" -ForegroundColor Green
 }
 
-# ── Create virtual environment ────────────────────────────────────────────────
+# Create virtual environment
 Write-Host ""
 Write-Host "Creating virtual environment (.venv)..."
 & $pythonCmd -m venv .venv
 
-# ── Upgrade pip (non-fatal) ───────────────────────────────────────────────────
+# Upgrade pip (non-fatal)
 Write-Host "Upgrading pip..."
 try {
     & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
 } catch {
-    Write-Host "  (pip upgrade skipped — continuing)" -ForegroundColor DarkGray
+    Write-Host "  (pip upgrade skipped - continuing)" -ForegroundColor DarkGray
 }
 
-# ── Install dependencies from requirements.txt ───────────────────────────────
+# Install dependencies from requirements.txt
 Write-Host "Installing dependencies..."
 & ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {

@@ -16,8 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 class ExifWriter:
-    def __init__(self, exiftool_path: str = "exiftool") -> None:
+    def __init__(
+        self,
+        exiftool_path: str = "exiftool",
+        create_backup: bool = True,
+    ) -> None:
         self._exiftool_path = exiftool_path
+        self._create_backup = create_backup
 
     def write_date(self, path: Path, date: datetime) -> WriteResult:
         """Write a single file's date. Returns WriteResult."""
@@ -42,12 +47,16 @@ class ExifWriter:
         argfile_lines: list[str] = []
         for path, date in tasks:
             date_str = datetime_to_exif_str(date)
-            argfile_lines += [
+            block: list[str] = []
+            if not self._create_backup:
+                block.append("-overwrite_original")
+            block += [
                 f"-DateTimeOriginal={date_str}",
                 f"-CreateDate={date_str}",
                 str(path),
                 "-execute",
             ]
+            argfile_lines += block
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False, encoding="utf-8"

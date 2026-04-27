@@ -32,12 +32,16 @@ class ProcessingPipeline:
         self._resolver = resolver
 
     @classmethod
-    def create(cls, exiftool_path: str = "exiftool") -> "ProcessingPipeline":
+    def create(
+        cls,
+        exiftool_path: str = "exiftool",
+        date_pref: str = "ask",
+    ) -> "ProcessingPipeline":
         """Factory that wires up a default pipeline."""
         return cls(
             scanner=FileScanner(),
             exif_reader=ExifReader(exiftool_path=exiftool_path),
-            filename_parser=FilenameParser(),
+            filename_parser=FilenameParser(date_pref=date_pref),
             json_reader=GoogleJsonReader(),
             resolver=DateResolver(),
         )

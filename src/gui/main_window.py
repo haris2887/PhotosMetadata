@@ -4,7 +4,10 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from PyQt6.QtCore import QThreadPool
+from datetime import datetime
+
+from PyQt6.QtCore import QPoint, QThreadPool
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFileDialog,
     QLabel,
@@ -91,6 +94,8 @@ class MainWindow(QMainWindow):
 
         # ── Results table ────────────────────────────────────────────────────
         self._table = ResultsTableView()
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         layout.addWidget(self._table, stretch=1)
 
         # ── Status bar ───────────────────────────────────────────────────────
@@ -100,8 +105,14 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("Ready")
         self._status_bar.addWidget(self._status_label, stretch=1)
 
+        self._progress_count_label = QLabel("")
+        self._progress_count_label.setVisible(False)
+        self._status_bar.addPermanentWidget(self._progress_count_label)
+
         self._progress_bar = QProgressBar()
-        self._progress_bar.setMaximumWidth(200)
+        self._progress_bar.setMinimumWidth(220)
+        self._progress_bar.setMaximumWidth(300)
+        self._progress_bar.setTextVisible(True)
         self._progress_bar.setVisible(False)
         self._status_bar.addPermanentWidget(self._progress_bar)
 
@@ -156,11 +167,16 @@ class MainWindow(QMainWindow):
 
         self._scan_btn.setEnabled(False)
         self._apply_btn.setEnabled(False)
-        self._progress_bar.setRange(0, 0)  # indeterminate
+        self._progress_bar.setRange(0, 0)  # indeterminate until total is known
+        self._progress_bar.setFormat("")
         self._progress_bar.setVisible(True)
+        self._progress_count_label.setText("Discovering files…")
+        self._progress_count_label.setVisible(True)
         self._status_label.setText("Scanning…")
 
-        pipeline = ProcessingPipeline.create(exiftool_path=et_path)
+        _PREF_MAP = ("ask", "dmy", "mdy")
+        date_pref = _PREF_MAP[SettingsDialog.date_format_pref()]
+        pipeline = ProcessingPipeline.create(exiftool_path=et_path, date_pref=date_pref)
         worker = ScanWorker(pipeline, self._root)
         worker.signals.progress.connect(self._on_scan_progress)
         worker.signals.finished.connect(self._on_scan_complete)
@@ -170,11 +186,19 @@ class MainWindow(QMainWindow):
     def _on_scan_progress(self, current: int, total: int, name: str) -> None:
         self._progress_bar.setRange(0, total)
         self._progress_bar.setValue(current)
-        self._status_label.setText(f"Scanning {current}/{total}: {name}")
+        self._progress_bar.setFormat("%p%")
+        if current == 0:
+            # EXIF batch read phase — total known but not yet counting per-file
+            self._progress_count_label.setText(f"Reading EXIF  |  0 / {total:,} files")
+            self._status_label.setText("Reading EXIF data…")
+        else:
+            self._progress_count_label.setText(f"{current:,} / {total:,} files")
+            self._status_label.setText(f"Processing: {name}")
 
     def _on_scan_complete(self, result: ScanResult) -> None:
         self._scan_result = result
         self._progress_bar.setVisible(False)
+        self._progress_count_label.setVisible(False)
         self._scan_btn.setEnabled(True)
 
         self._table.load_result(result)
@@ -205,6 +229,7 @@ class MainWindow(QMainWindow):
 
     def _on_scan_error(self, error: str) -> None:
         self._progress_bar.setVisible(False)
+        self._progress_count_label.setVisible(False)
         self._scan_btn.setEnabled(True)
         self._status_label.setText(f"Scan error: {error}")
         QMessageBox.critical(self, "Scan Error", error)
@@ -247,15 +272,11 @@ class MainWindow(QMainWindow):
     def _on_apply_selected(self) -> None:
         if self._scan_result is None:
             return
-        selected_rows = {
-            self._table._proxy.mapToSource(idx).row()
-            for idx in self._table.selectedIndexes()
-        }
-        tasks = []
-        for row in selected_rows:
-            file = self._table.source_model().file_at(row)
-            if file and file.status == "resolved_single" and file.chosen_date:
-                tasks.append((file.path, file.chosen_date))
+        tasks = [
+            (f.path, f.chosen_date)
+            for f in self._selected_files()
+            if f.status == "resolved_single" and f.chosen_date is not None
+        ]
         self._start_write(tasks)
 
     def _start_write(self, tasks: list) -> None:
@@ -264,18 +285,23 @@ class MainWindow(QMainWindow):
                                     "No files with resolved dates to write.")
             return
 
+        create_backup = SettingsDialog.create_backup()
+        backup_note = (
+            "ExifTool will save originals as <filename>_original."
+            if create_backup
+            else "Backups are DISABLED — original files will be overwritten."
+        )
         reply = QMessageBox.question(
             self,
             "Confirm Write",
-            f"Write dates to {len(tasks)} file(s)?\n\n"
-            "ExifTool will create <filename>_original backups automatically.",
+            f"Write dates to {len(tasks)} file(s)?\n\n{backup_note}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
         et_path = SettingsDialog.exiftool_path()
-        writer = ExifWriter(exiftool_path=et_path)
+        writer = ExifWriter(exiftool_path=et_path, create_backup=create_backup)
         worker = WriteWorker(writer, tasks)
         worker.signals.progress.connect(
             lambda cur, total: (
@@ -315,6 +341,113 @@ class MainWindow(QMainWindow):
         self._progress_bar.setVisible(False)
         self._apply_btn.setEnabled(True)
         QMessageBox.critical(self, "Write Error", error)
+
+    # ── Bulk resolve (right-click context menu) ───────────────────────────────
+
+    def _on_table_context_menu(self, pos: QPoint) -> None:
+        if self._scan_result is None:
+            return
+        files = self._selected_files()
+        if not files:
+            return
+
+        has_filename = any(f.filename_date for f in files)
+        has_json = any(f.json_date for f in files)
+        has_any = has_filename or has_json
+
+        menu = QMenu(self._table)
+        menu.addSection(f"{len(files)} file{'s' if len(files) != 1 else ''} selected")
+
+        act_fn = menu.addAction("Apply Filename Date to Selected")
+        act_fn.setEnabled(has_filename)
+
+        act_js = menu.addAction("Apply JSON Date to Selected")
+        act_js.setEnabled(has_json)
+
+        menu.addSeparator()
+
+        act_early = menu.addAction("Apply Earlier Date to Selected")
+        act_early.setEnabled(has_any)
+
+        act_late = menu.addAction("Apply Later Date to Selected")
+        act_late.setEnabled(has_any)
+
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+
+        if action == act_fn:
+            self._bulk_apply("filename", files)
+        elif action == act_js:
+            self._bulk_apply("json", files)
+        elif action == act_early:
+            self._bulk_apply("earlier", files)
+        elif action == act_late:
+            self._bulk_apply("later", files)
+
+    def _selected_files(self) -> list[PhotoFile]:
+        source_rows = sorted({
+            self._table._proxy.mapToSource(idx).row()
+            for idx in self._table.selectedIndexes()
+        })
+        return [f for r in source_rows
+                if (f := self._table.source_model().file_at(r)) is not None]
+
+    def _pick_date(self, file: PhotoFile, source: str) -> datetime | None:
+        if source == "filename":
+            return file.filename_date.date_value if file.filename_date else None
+        if source == "json":
+            return file.json_date.date_value if file.json_date else None
+        # "earlier" / "later" — consider all available sources
+        candidates: list[datetime] = []
+        if file.filename_date:
+            candidates.append(file.filename_date.date_value)
+        if file.json_date:
+            candidates.append(file.json_date.date_value)
+        if file.exif_date:
+            candidates.append(file.exif_date)
+        if not candidates:
+            return None
+        return min(candidates) if source == "earlier" else max(candidates)
+
+    def _bulk_apply(self, source: str, files: list[PhotoFile]) -> None:
+        applied = 0
+        skipped = 0
+
+        for file in files:
+            if file.status == "has_exif":
+                skipped += 1
+                continue
+            dt = self._pick_date(file, source)
+            if dt is None:
+                skipped += 1
+                continue
+
+            updated = replace(file, chosen_date=dt, status="resolved_single")
+            self._table.source_model().update_file(file.path, updated)
+
+            if self._scan_result:
+                for i, f in enumerate(self._scan_result.files):
+                    if f.path == file.path:
+                        self._scan_result.files[i] = updated
+                        break
+
+            applied += 1
+
+        if self._scan_result:
+            can_apply = any(
+                f.status == "resolved_single" for f in self._scan_result.files
+            )
+            self._apply_btn.setEnabled(can_apply)
+
+        labels = {
+            "filename": "Filename Date",
+            "json": "JSON Date",
+            "earlier": "Earlier Date",
+            "later": "Later Date",
+        }
+        msg = f"Applied {labels[source]} to {applied} file(s)."
+        if skipped:
+            msg += f"  ({skipped} skipped — date not available or already has EXIF)"
+        self._status_label.setText(msg)
 
     # ── Settings ─────────────────────────────────────────────────────────────
 

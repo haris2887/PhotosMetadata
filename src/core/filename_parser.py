@@ -50,11 +50,20 @@ _AMBIGUOUS = re.compile(r'(?<!\d)(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})(?!\d)')
 
 
 class FilenameParser:
+    def __init__(self, date_pref: str = "ask") -> None:
+        """
+        date_pref controls how ambiguous DD/MM/YYYY vs MM/DD/YYYY dates are resolved:
+          "ask"  — return low confidence so the resolver flags a conflict (default)
+          "dmy"  — treat first number as day, second as month (UK/EU format)
+          "mdy"  — treat first number as month, second as day (US format)
+        """
+        self._date_pref = date_pref
+
     def parse(self, path: Path) -> DateSource | None:
         """
         Return the best DateSource from the filename, or None if no date found.
-        When the date is ambiguous (DMY vs MDY and both valid), returns the first
-        valid interpretation with confidence='low' so the resolver can flag a conflict.
+        When the date is ambiguous (DMY vs MDY and both valid), behaviour depends
+        on date_pref: 'ask' returns low confidence; 'dmy'/'mdy' returns high confidence.
         """
         stem = path.stem
 
@@ -87,10 +96,29 @@ class FilenameParser:
         m = _AMBIGUOUS.search(stem)
         if m:
             a, b, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            dt = _valid_date(year, b, a) or _valid_date(year, a, b)
-            if dt:
-                logger.debug("Filename date (ambiguous): %s → %s (low confidence)", stem, dt)
-                return DateSource("filename", dt, "low", stem)
+            if self._date_pref == "dmy":
+                dt = _valid_date(year, b, a)  # day=a, month=b
+                if dt:
+                    logger.debug("Filename date (dmy pref): %s → %s", stem, dt)
+                    return DateSource("filename", dt, "high", stem)
+                dt = _valid_date(year, a, b)  # fallback
+                if dt:
+                    logger.debug("Filename date (dmy fallback→mdy): %s → %s (low)", stem, dt)
+                    return DateSource("filename", dt, "low", stem)
+            elif self._date_pref == "mdy":
+                dt = _valid_date(year, a, b)  # month=a, day=b
+                if dt:
+                    logger.debug("Filename date (mdy pref): %s → %s", stem, dt)
+                    return DateSource("filename", dt, "high", stem)
+                dt = _valid_date(year, b, a)  # fallback
+                if dt:
+                    logger.debug("Filename date (mdy fallback→dmy): %s → %s (low)", stem, dt)
+                    return DateSource("filename", dt, "low", stem)
+            else:  # "ask"
+                dt = _valid_date(year, b, a) or _valid_date(year, a, b)
+                if dt:
+                    logger.debug("Filename date (ambiguous): %s → %s (low confidence)", stem, dt)
+                    return DateSource("filename", dt, "low", stem)
 
         # Layer 4 — dateutil fuzzy fallback
         return self._dateutil_fallback(stem)

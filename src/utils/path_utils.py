@@ -4,11 +4,11 @@ from pathlib import Path
 
 
 def get_relative_display_path(path: Path, root: Path) -> str:
-    """Return path relative to root for display in the results table."""
+    """Return path relative to root for display in the results table, always with forward slashes."""
     try:
-        return str(path.relative_to(root))
+        return path.relative_to(root).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def safe_stem(path: Path) -> str:

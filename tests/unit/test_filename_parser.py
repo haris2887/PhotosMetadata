@@ -53,16 +53,48 @@ class TestIsoPatterns:
 class TestAmbiguousPatterns:
     def test_ambiguous_returns_low_confidence(self, parser: FilenameParser) -> None:
         result = parser.parse(Path("01-12-2026.jpg"))
-        # Ambiguous dates should be found but marked low confidence
         if result is not None:
             assert result.confidence == "low"
 
     def test_unambiguous_dmy_date(self, parser: FilenameParser) -> None:
-        # Day 28 can only be DMY if month is valid — year first rules out MDY here
-        # This tests a non-ambiguous DMY: 28-03-2026 → March 28 (month 13 invalid)
+        # 28-03-2026: day=28, month=03 — only valid as DMY (month 28 is invalid)
         result = parser.parse(Path("28-03-2026.jpg"))
         assert result is not None
         assert result.date_value.date() == date(2026, 3, 28)
+
+
+class TestDatePrefDMY:
+    def test_ambiguous_dmy_pref_picks_day_first(self) -> None:
+        p = FilenameParser(date_pref="dmy")
+        # 05-03-2026 — ambiguous: DMY=March 5, MDY=May 3
+        result = p.parse(Path("05-03-2026.jpg"))
+        assert result is not None
+        assert result.date_value.date() == date(2026, 3, 5)  # March 5
+        assert result.confidence == "high"
+
+    def test_ambiguous_mdy_pref_picks_month_first(self) -> None:
+        p = FilenameParser(date_pref="mdy")
+        # 05-03-2026 — ambiguous: MDY=May 3, DMY=March 5
+        result = p.parse(Path("05-03-2026.jpg"))
+        assert result is not None
+        assert result.date_value.date() == date(2026, 5, 3)  # May 3
+        assert result.confidence == "high"
+
+    def test_unambiguous_date_unaffected_by_pref(self) -> None:
+        p_dmy = FilenameParser(date_pref="dmy")
+        p_mdy = FilenameParser(date_pref="mdy")
+        # 28-03-2026: only valid as DMY (month 28 invalid)
+        r_dmy = p_dmy.parse(Path("28-03-2026.jpg"))
+        r_mdy = p_mdy.parse(Path("28-03-2026.jpg"))
+        assert r_dmy is not None and r_mdy is not None
+        assert r_dmy.date_value.date() == date(2026, 3, 28)
+        assert r_mdy.date_value.date() == date(2026, 3, 28)
+
+    def test_ask_pref_returns_low_confidence_on_ambiguous(self) -> None:
+        p = FilenameParser(date_pref="ask")
+        result = p.parse(Path("05-03-2026.jpg"))
+        assert result is not None
+        assert result.confidence == "low"
 
 
 class TestNoDate:
