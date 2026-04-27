@@ -1,9 +1,12 @@
 @echo off
 REM Setup script for PhotosMetadata — Windows (Command Prompt)
-REM Run from the project root:  scripts\setup.bat
+REM Can be run from anywhere — it always operates from the project root.
 REM
 REM For a richer experience with coloured output, use setup.ps1 instead:
 REM   powershell -ExecutionPolicy RemoteSigned -File scripts\setup.ps1
+
+REM ── Always work from the project root (one level above this script) ──────────
+cd /d "%~dp0.."
 
 echo Setting up PhotosMetadata project...
 echo.

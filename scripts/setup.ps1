@@ -1,5 +1,5 @@
 # Setup script for PhotosMetadata — Windows (PowerShell)
-# Run from the project root:  .\scripts\setup.ps1
+# Can be run from anywhere — it always operates from the project root.
 #
 # Requirements:
 #   - PowerShell 5.1+ (built into Windows 10/11) or PowerShell 7+
@@ -8,6 +8,10 @@
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# ── Always work from the project root (one level above this script) ───────────
+$projectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $projectRoot
 
 Write-Host "Setting up PhotosMetadata project..." -ForegroundColor Cyan
 

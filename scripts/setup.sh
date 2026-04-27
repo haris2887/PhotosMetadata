@@ -1,7 +1,11 @@
 #!/bin/bash
 # Setup script for PhotosMetadata development environment
+# Can be run from anywhere — it always operates from the project root.
 
 set -e
+
+# ── Always work from the project root (one level above this script) ───────────
+cd "$(dirname "$0")/.."
 
 echo "Setting up PhotosMetadata project..."
 
