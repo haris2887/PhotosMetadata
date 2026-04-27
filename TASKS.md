@@ -1,30 +1,31 @@
 # Task Queue
 
 ## 🔴 In Progress
-_(nothing currently in progress)_
+_(nothing currently in progress — handoff to Windows / VS Code)_
 
 ## 🟡 Ready to Start
-- [ ] Install dependencies in a Python 3.12 venv: `bash scripts/setup.sh`
-- [ ] Install ExifTool: `brew install exiftool` (macOS)
-- [ ] Write tests/integration/test_exif_writer.py (requires real JPEG fixture + ExifTool)
-- [ ] Add a small real JPEG (with + without EXIF) to tests/fixtures/
-- [ ] Smoke-test the GUI: `python src/main.py`
-- [ ] Test end-to-end with a real Google Takeout folder
+- [ ] **Install & smoke-test on Windows**: run `scripts\setup.bat`, install ExifTool, launch `python src\main.py`
+- [ ] **Wire DMY/MDY setting into FilenameParser**: `SettingsDialog.date_format_pref()` is saved but `FilenameParser` doesn't read it yet — ambiguous dates always use first valid parse
+- [ ] **Write `tests/integration/test_exif_writer.py`**: needs a real JPEG in `tests/fixtures/` and ExifTool installed; mark with `@pytest.mark.requires_exiftool`
+- [ ] **Add test fixtures**: place a small JPEG with EXIF date, one without, and a sample Google Takeout `.json` into `tests/fixtures/`
+- [ ] **End-to-end test with real Google Takeout folder**: scan a real Takeout export, verify JSON matching, dates applied correctly
 
 ## ⚪ Backlog
-- [ ] Export summary report (CSV of what was changed)
-- [ ] Filter bar above the results table (show only missing / only conflicts)
-- [ ] Undo last write (rename _original back)
+- [ ] Filter/search bar above results table (show only missing / only conflicts)
+- [ ] Export summary report — CSV of what was changed (path, old date, new date, source)
+- [ ] Undo last write — rename `filename_original` back to `filename`
 - [ ] Dark mode toggle
-- [ ] Settings: DMY/MDY ambiguity preference is saved but not yet wired into FilenameParser
-- [ ] App icon + macOS .app bundle / Windows installer
-- [ ] CI pipeline (GitHub Actions: pytest on push)
+- [ ] App icon + macOS `.app` bundle / Windows `.exe` installer (PyInstaller)
+- [ ] CI pipeline — GitHub Actions: run `pytest tests/unit/` on every push
+- [ ] Settings: remember last-used directory between sessions
 
 ## ✅ Done
 - [x] Project structure scaffolded
-- [x] pyproject.toml, requirements.txt, setup.sh
-- [x] Data models (DateSource, PhotoFile, ScanResult)
-- [x] Core logic: scanner, filename_parser, json_reader, resolver
-- [x] ExifTool integration: reader, writer, checker, pipeline
-- [x] Full GUI: MainWindow, ResultsTable, ConflictDialog, Workers, SettingsDialog
+- [x] `pyproject.toml`, `requirements.txt`, `.gitignore`, `setup.sh/bat/ps1`
+- [x] Data models: `DateSource`, `PhotoFile`, `WriteResult`, `ScanResult`
+- [x] Core logic: `FileScanner`, `FilenameParser`, `GoogleJsonReader`, `DateResolver`
+- [x] ExifTool integration: `ExifReader`, `ExifWriter`, `ExifToolChecker`, `ProcessingPipeline`
+- [x] Full GUI: `MainWindow`, `ResultsTable`, `ConflictDialog`, workers, `SettingsDialog`
 - [x] 86 unit + integration tests passing
+- [x] Repo pushed to GitHub (public): https://github.com/haris2887/PhotosMetadata
+- [x] Windows setup scripts fixed (requirements.txt install, non-fatal pip upgrade)
