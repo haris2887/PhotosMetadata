@@ -50,8 +50,8 @@ if errorlevel 1 (
 
 REM ── Install dependencies ─────────────────────────────────────────────────────
 echo Installing dependencies...
-.venv\Scripts\pip.exe install --upgrade pip --quiet
-.venv\Scripts\pip.exe install -e ".[dev]"
+.venv\Scripts\python.exe -m pip install --upgrade pip --quiet
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 if errorlevel 1 (
     echo ERROR: Dependency installation failed.
     exit /b 1

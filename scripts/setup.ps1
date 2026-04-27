@@ -63,9 +63,9 @@ Write-Host "Creating virtual environment (.venv)..."
 
 # ── Activate and install dependencies ────────────────────────────────────────
 Write-Host "Installing dependencies..."
-$pip = ".\.venv\Scripts\pip.exe"
-& $pip install --upgrade pip --quiet
-& $pip install -e ".[dev]"
+$pip = ".\.venv\Scripts\python.exe"
+& $pip -m pip install --upgrade pip --quiet
+& $pip -m pip install -e ".[dev]"
 
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
