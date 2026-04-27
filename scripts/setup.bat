@@ -15,7 +15,7 @@ REM ── Check Python ──────────────────�
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python not found in PATH.
-    echo Download Python 3.12 from: https://www.python.org/downloads/
+    echo Download Python from: https://www.python.org/downloads/
     echo Make sure to check "Add Python to PATH" during installation.
     exit /b 1
 )
@@ -48,12 +48,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ── Install dependencies ─────────────────────────────────────────────────────
+REM ── Upgrade pip (non-fatal — some environments restrict self-upgrade) ────────
+echo Upgrading pip...
+.venv\Scripts\python.exe -m pip install --upgrade pip --quiet 2>nul
+echo.
+
+REM ── Install dependencies from requirements.txt ───────────────────────────────
 echo Installing dependencies...
-.venv\Scripts\python.exe -m pip install --upgrade pip --quiet
-.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 (
-    echo ERROR: Dependency installation failed.
+    echo.
+    echo ERROR: Dependency installation failed. See error above.
     exit /b 1
 )
 

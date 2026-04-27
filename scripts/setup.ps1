@@ -3,7 +3,7 @@
 #
 # Requirements:
 #   - PowerShell 5.1+ (built into Windows 10/11) or PowerShell 7+
-#   - Python 3.12  https://www.python.org/downloads/
+#   - Python 3.9+  https://www.python.org/downloads/
 #   - ExifTool     https://exiftool.org  (see instructions below)
 
 Set-StrictMode -Version Latest
@@ -34,7 +34,7 @@ foreach ($cmd in @("python3.12", "python3", "python")) {
 if (-not $pythonCmd) {
     Write-Host ""
     Write-Host "ERROR: Python 3.9+ not found." -ForegroundColor Red
-    Write-Host "Download Python 3.12 from: https://www.python.org/downloads/"
+    Write-Host "Download Python from: https://www.python.org/downloads/"
     Write-Host "Make sure to check 'Add Python to PATH' during installation."
     exit 1
 }
@@ -61,11 +61,22 @@ Write-Host ""
 Write-Host "Creating virtual environment (.venv)..."
 & $pythonCmd -m venv .venv
 
-# ── Activate and install dependencies ────────────────────────────────────────
+# ── Upgrade pip (non-fatal) ───────────────────────────────────────────────────
+Write-Host "Upgrading pip..."
+try {
+    & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
+} catch {
+    Write-Host "  (pip upgrade skipped — continuing)" -ForegroundColor DarkGray
+}
+
+# ── Install dependencies from requirements.txt ───────────────────────────────
 Write-Host "Installing dependencies..."
-$pip = ".\.venv\Scripts\python.exe"
-& $pip -m pip install --upgrade pip --quiet
-& $pip -m pip install -e ".[dev]"
+& ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "ERROR: Dependency installation failed." -ForegroundColor Red
+    exit 1
+}
 
 Write-Host ""
 Write-Host "Setup complete!" -ForegroundColor Green
