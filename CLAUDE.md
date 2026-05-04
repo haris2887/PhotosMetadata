@@ -5,11 +5,12 @@ A cross-platform desktop app (Windows / macOS / Linux) that uses ExifTool to sca
 for photos and videos, identifies files with a missing "Date Taken" (DateTimeOriginal) EXIF tag,
 and attempts to recover the correct date from:
 1. The filename (various formats: IMG_20260328, 2026-03-28, Screenshot_20260328, etc.)
-2. Google Photos Takeout JSON sidecars (photoTakenTime.timestamp)
+2. Google Photos Takeout JSON sidecars (photoTakenTime.timestamp), including `.supplemental-metadata.json`
 
 When multiple conflicting date sources exist for a file, the app shows an interactive dialog
-asking the user to pick the correct date. Confirmed dates are written back to the original files
-via ExifTool (which automatically creates `_original` backups).
+asking the user to pick the correct date. Bulk resolution is also available via right-click
+context menu. Confirmed dates are written back to the original files via ExifTool (optional
+`_original` backups). Files that cannot be written are moved to a `_unwritable/` subfolder.
 
 ## Tech Stack
 - Language: Python 3.9+ (uses `from __future__ import annotations` for compatibility)
@@ -48,7 +49,7 @@ src/
 │   ├── conflict_dialog.py   ← ConflictDialog (per-file date resolution)
 │   ├── scan_worker.py       ← ScanWorker (QRunnable)
 │   ├── write_worker.py      ← WriteWorker (QRunnable)
-│   ├── settings_dialog.py   ← SettingsDialog (ExifTool path, DMY/MDY pref)
+│   ├── settings_dialog.py   ← SettingsDialog (ExifTool path, DMY/MDY pref, backup toggle)
 │   └── app.py               ← QApplication + main()
 └── utils/                   ← date_utils, path_utils, logging_config
 tests/
@@ -75,8 +76,8 @@ source .venv/bin/activate      # macOS / Linux
 python src/main.py
 
 # 4. Run tests
-pytest tests/unit/             # no ExifTool needed
-pytest tests/ -m requires_exiftool   # needs ExifTool installed
+pytest tests/unit/             # no ExifTool needed (78 tests)
+pytest tests/                  # full suite, 113 tests (ExifTool must be installed)
 ```
 
 ## Current Status

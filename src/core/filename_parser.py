@@ -127,7 +127,7 @@ class FilenameParser:
         try:
             from dateutil.parser import ParserError, parse as dateutil_parse
 
-            dt = dateutil_parse(stem, fuzzy=True)
+            dt = dateutil_parse(stem, fuzzy=True).replace(tzinfo=None)
             if _MIN_YEAR <= dt.year <= _max_year():
                 logger.debug("Filename date (dateutil): %s → %s", stem, dt)
                 return DateSource("filename", dt.replace(hour=0, minute=0, second=0),

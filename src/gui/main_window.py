@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,8 +10,14 @@ from datetime import datetime
 from PyQt6.QtCore import QPoint, QThreadPool
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -18,7 +25,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QStatusBar,
     QToolButton,
-    QHBoxLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -84,6 +90,22 @@ class MainWindow(QMainWindow):
         self._apply_btn.clicked.connect(self._on_apply_all)
         toolbar.addWidget(self._apply_btn)
 
+        self._move_missing_btn = QPushButton("Move Missing…")
+        self._move_missing_btn.setEnabled(False)
+        self._move_missing_btn.setToolTip(
+            "Move files with no recoverable date to a separate folder"
+        )
+        self._move_missing_btn.clicked.connect(self._on_move_missing_clicked)
+        toolbar.addWidget(self._move_missing_btn)
+
+        self._move_selected_btn = QPushButton("Move Selected…")
+        self._move_selected_btn.setEnabled(False)
+        self._move_selected_btn.setToolTip(
+            "Move the highlighted rows to a chosen folder"
+        )
+        self._move_selected_btn.clicked.connect(self._on_move_selected_clicked)
+        toolbar.addWidget(self._move_selected_btn)
+
         settings_btn = QPushButton("⚙")
         settings_btn.setFixedWidth(32)
         settings_btn.setToolTip("Settings")
@@ -146,6 +168,8 @@ class MainWindow(QMainWindow):
             self._path_label.setText(directory)
             self._scan_btn.setEnabled(True)
             self._apply_btn.setEnabled(False)
+            self._move_missing_btn.setEnabled(False)
+            self._move_selected_btn.setEnabled(False)
             self._scan_result = None
             self._table.source_model().update(
                 ScanResult(root_dir=self._root, files=[])
@@ -226,6 +250,8 @@ class MainWindow(QMainWindow):
 
         can_apply = bool(result.auto_queue or result.needs_user)
         self._apply_btn.setEnabled(can_apply)
+        self._move_missing_btn.setEnabled(bool(result.missing))
+        self._move_selected_btn.setEnabled(bool(result.files))
 
     def _on_scan_error(self, error: str) -> None:
         self._progress_bar.setVisible(False)
@@ -324,17 +350,81 @@ class MainWindow(QMainWindow):
         self._apply_btn.setEnabled(True)
 
         success = sum(1 for r in results if r.success)
-        failed = len(results) - success
-        self._status_label.setText(
-            f"Done: {success} written, {failed} failed"
+        failed_results = [r for r in results if not r.success]
+        failed = len(failed_results)
+
+        self._status_label.setText(f"Done: {success} written, {failed} failed")
+
+        if not failed_results:
+            return
+
+        failed_names = "\n".join(r.path.name for r in failed_results[:50])
+        if failed > 50:
+            failed_names += f"\n…and {failed - 50} more"
+
+        reply = QMessageBox.question(
+            self,
+            "Write Errors",
+            f"{failed} file(s) could not be updated:\n\n{failed_names}\n\n"
+            f"Move these files to a '_unwritable' folder so they are easy to find?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if failed:
-            failed_names = "\n".join(
-                r.path.name for r in results if not r.success
-            )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._move_failed_files(failed_results)
+
+    def _move_failed_files(self, failed_results: list[WriteResult]) -> None:
+        if self._root is None:
+            return
+
+        from core.json_reader import GoogleJsonReader
+        json_reader = GoogleJsonReader()
+
+        dest_root = self._root / "_unwritable"
+        moved = 0
+        move_errors: list[str] = []
+
+        for result in failed_results:
+            try:
+                # Preserve the relative subfolder structure under _unwritable/
+                try:
+                    rel = result.path.relative_to(self._root)
+                except ValueError:
+                    rel = Path(result.path.name)
+                dest = dest_root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                # Find JSON sidecar BEFORE moving the image (while paths still match)
+                json_path = json_reader.find_json(result.path, scan_root=self._root)
+
+                shutil.move(str(result.path), str(dest))
+                moved += 1
+
+                # Move the JSON sidecar to the same destination subfolder
+                if json_path and json_path.exists():
+                    try:
+                        json_rel = json_path.relative_to(self._root)
+                    except ValueError:
+                        json_rel = Path(json_path.name)
+                    json_dest = dest_root / json_rel
+                    json_dest.parent.mkdir(parents=True, exist_ok=True)
+                    if not json_dest.exists():
+                        shutil.move(str(json_path), str(json_dest))
+                        logger.info(
+                            "Moved JSON sidecar %s → %s", json_path.name, json_dest.name
+                        )
+            except Exception as exc:
+                move_errors.append(f"{result.path.name}: {exc}")
+
+        msg = f"Moved {moved} file(s) to '{dest_root}'"
+        if move_errors:
+            msg += f" ({len(move_errors)} could not be moved)"
+        self._status_label.setText(msg)
+
+        if move_errors:
             QMessageBox.warning(
-                self, "Write Errors",
-                f"{failed} file(s) could not be updated:\n{failed_names}"
+                self, "Move Errors",
+                f"Could not move {len(move_errors)} file(s):\n\n"
+                + "\n".join(move_errors[:20]),
             )
 
     def _on_write_error(self, error: str) -> None:
@@ -342,18 +432,327 @@ class MainWindow(QMainWindow):
         self._apply_btn.setEnabled(True)
         QMessageBox.critical(self, "Write Error", error)
 
+    # ── Move missing files ────────────────────────────────────────────────────
+
+    def _on_move_missing_clicked(self) -> None:
+        if self._scan_result is None or self._root is None:
+            return
+
+        missing = self._scan_result.missing
+        if not missing:
+            QMessageBox.information(
+                self, "No Missing Files",
+                "There are no files with an unrecoverable date in the current scan."
+            )
+            return
+
+        default_dest = str(self._root / "_undated")
+
+        # ── Build dialog ──────────────────────────────────────────────────────
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Move Files With No Recoverable Date")
+        dlg.setMinimumWidth(520)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+
+        info = QLabel(
+            f"<b>{len(missing)}</b> file(s) have no date that could be recovered "
+            f"from the filename, a JSON sidecar, or existing EXIF data.\n\n"
+            f"These files will be moved to the destination folder below, "
+            f"preserving their relative subfolder structure."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+
+        dest_row = QHBoxLayout()
+        dest_edit = QLineEdit(default_dest)
+        dest_row.addWidget(dest_edit, stretch=1)
+        browse_btn = QPushButton("Browse…")
+
+        def _browse() -> None:
+            chosen = QFileDialog.getExistingDirectory(
+                dlg, "Choose Destination Folder", dest_edit.text()
+            )
+            if chosen:
+                dest_edit.setText(chosen)
+
+        browse_btn.clicked.connect(_browse)
+        dest_row.addWidget(browse_btn)
+        form.addRow("Destination folder:", dest_row)
+        layout.addLayout(form)
+
+        move_json_cb = QCheckBox("Also move matching JSON sidecar files")
+        move_json_cb.setChecked(True)
+        layout.addWidget(move_json_cb)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Move Files")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        dest_root = Path(dest_edit.text().strip())
+        if not dest_root.name:
+            QMessageBox.warning(self, "Invalid Path", "Please enter a destination folder.")
+            return
+
+        self._move_missing_files(missing, dest_root, move_json=move_json_cb.isChecked())
+
+    def _move_missing_files(
+        self,
+        missing: list,
+        dest_root: Path,
+        move_json: bool,
+    ) -> None:
+        from core.json_reader import GoogleJsonReader
+        json_reader = GoogleJsonReader()
+
+        moved = 0
+        json_moved = 0
+        json_found_but_not_moved = 0
+        move_errors: list[str] = []
+
+        for file in missing:
+            try:
+                try:
+                    rel = file.path.relative_to(self._root)
+                except ValueError:
+                    rel = Path(file.path.name)
+                dest = dest_root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                # Locate JSON before moving the image (path still valid)
+                json_path = json_reader.find_json(file.path, scan_root=self._root)
+
+                shutil.move(str(file.path), str(dest))
+                moved += 1
+                logger.info("Moved undated file %s → %s", file.path.name, dest)
+
+                if json_path and json_path.exists():
+                    if move_json:
+                        try:
+                            json_rel = json_path.relative_to(self._root)
+                        except ValueError:
+                            json_rel = Path(json_path.name)
+                        json_dest = dest_root / json_rel
+                        json_dest.parent.mkdir(parents=True, exist_ok=True)
+                        if not json_dest.exists():
+                            shutil.move(str(json_path), str(json_dest))
+                            json_moved += 1
+                            logger.info(
+                                "Moved JSON sidecar %s → %s",
+                                json_path.name, json_dest.name,
+                            )
+                    else:
+                        json_found_but_not_moved += 1
+                        logger.info(
+                            "JSON sidecar left in place (not requested): %s",
+                            json_path.name,
+                        )
+            except Exception as exc:
+                move_errors.append(f"{file.path.name}: {exc}")
+
+        # Update scan result so the table reflects files are gone
+        if self._scan_result is not None:
+            moved_paths = {f.path for f in missing if not any(
+                e.startswith(f.path.name) for e in move_errors
+            )}
+            self._scan_result.files = [
+                f for f in self._scan_result.files if f.path not in moved_paths
+            ]
+            self._table.load_result(self._scan_result)
+            self._move_missing_btn.setEnabled(bool(self._scan_result.missing))
+
+        parts = [f"Moved {moved} undated file(s) to '{dest_root.name}'"]
+        if json_moved:
+            parts.append(f"{json_moved} JSON sidecar(s) moved")
+        if json_found_but_not_moved:
+            parts.append(f"{json_found_but_not_moved} JSON sidecar(s) left in place")
+        if move_errors:
+            parts.append(f"{len(move_errors)} could not be moved")
+        self._status_label.setText("  |  ".join(parts))
+
+        if move_errors:
+            QMessageBox.warning(
+                self, "Move Errors",
+                f"Could not move {len(move_errors)} file(s):\n\n"
+                + "\n".join(move_errors[:20]),
+            )
+
+    # ── Move selected files ───────────────────────────────────────────────────
+
+    def _on_move_selected_clicked(self) -> None:
+        if self._scan_result is None or self._root is None:
+            return
+
+        files = self._selected_files()
+        if not files:
+            QMessageBox.information(
+                self, "No Selection",
+                "Select one or more rows in the table first."
+            )
+            return
+
+        default_dest = str(self._root / "_moved")
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Move Selected Files")
+        dlg.setMinimumWidth(520)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+
+        info = QLabel(
+            f"<b>{len(files)}</b> file(s) selected.\n\n"
+            f"These files will be moved to the destination folder below, "
+            f"preserving their relative subfolder structure."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+
+        dest_row = QHBoxLayout()
+        dest_edit = QLineEdit(default_dest)
+        dest_row.addWidget(dest_edit, stretch=1)
+        browse_btn = QPushButton("Browse…")
+
+        def _browse() -> None:
+            chosen = QFileDialog.getExistingDirectory(
+                dlg, "Choose Destination Folder", dest_edit.text()
+            )
+            if chosen:
+                dest_edit.setText(chosen)
+
+        browse_btn.clicked.connect(_browse)
+        dest_row.addWidget(browse_btn)
+        form.addRow("Destination folder:", dest_row)
+        layout.addLayout(form)
+
+        move_json_cb = QCheckBox("Also move matching JSON sidecar files")
+        move_json_cb.setChecked(True)
+        layout.addWidget(move_json_cb)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Move Files")
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        dest_root = Path(dest_edit.text().strip())
+        if not dest_root.name:
+            QMessageBox.warning(self, "Invalid Path", "Please enter a destination folder.")
+            return
+
+        self._move_files(files, dest_root, move_json=move_json_cb.isChecked())
+
+    def _move_files(
+        self,
+        files: list[PhotoFile],
+        dest_root: Path,
+        move_json: bool,
+    ) -> None:
+        from core.json_reader import GoogleJsonReader
+        json_reader = GoogleJsonReader()
+
+        moved = 0
+        json_moved = 0
+        json_found_but_not_moved = 0
+        move_errors: list[str] = []
+
+        for file in files:
+            try:
+                try:
+                    rel = file.path.relative_to(self._root)
+                except ValueError:
+                    rel = Path(file.path.name)
+                dest = dest_root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                json_path = json_reader.find_json(file.path, scan_root=self._root)
+
+                shutil.move(str(file.path), str(dest))
+                moved += 1
+                logger.info("Moved selected file %s → %s", file.path.name, dest)
+
+                if json_path and json_path.exists():
+                    if move_json:
+                        try:
+                            json_rel = json_path.relative_to(self._root)
+                        except ValueError:
+                            json_rel = Path(json_path.name)
+                        json_dest = dest_root / json_rel
+                        json_dest.parent.mkdir(parents=True, exist_ok=True)
+                        if not json_dest.exists():
+                            shutil.move(str(json_path), str(json_dest))
+                            json_moved += 1
+                    else:
+                        json_found_but_not_moved += 1
+            except Exception as exc:
+                move_errors.append(f"{file.path.name}: {exc}")
+
+        # Remove moved files from the table
+        if self._scan_result is not None:
+            moved_paths = {f.path for f in files if not any(
+                e.startswith(f.path.name) for e in move_errors
+            )}
+            self._scan_result.files = [
+                f for f in self._scan_result.files if f.path not in moved_paths
+            ]
+            self._table.load_result(self._scan_result)
+            self._move_missing_btn.setEnabled(bool(self._scan_result.missing))
+            self._move_selected_btn.setEnabled(bool(self._scan_result.files))
+
+        parts = [f"Moved {moved} file(s) to '{dest_root.name}'"]
+        if json_moved:
+            parts.append(f"{json_moved} JSON sidecar(s) moved")
+        if json_found_but_not_moved:
+            parts.append(f"{json_found_but_not_moved} JSON sidecar(s) left in place")
+        if move_errors:
+            parts.append(f"{len(move_errors)} could not be moved")
+        self._status_label.setText("  |  ".join(parts))
+
+        if move_errors:
+            QMessageBox.warning(
+                self, "Move Errors",
+                f"Could not move {len(move_errors)} file(s):\n\n"
+                + "\n".join(move_errors[:20]),
+            )
+
     # ── Bulk resolve (right-click context menu) ───────────────────────────────
 
     def _on_table_context_menu(self, pos: QPoint) -> None:
         if self._scan_result is None:
             return
+
+        # If nothing is selected, select the row under the cursor automatically.
+        # (Qt's ExtendedSelection doesn't change selection on right-click alone.)
+        if not self._table.selectedIndexes():
+            idx = self._table.indexAt(pos)
+            if idx.isValid():
+                self._table.selectRow(idx.row())
+
         files = self._selected_files()
         if not files:
             return
 
         has_filename = any(f.filename_date for f in files)
         has_json = any(f.json_date for f in files)
-        has_any = has_filename or has_json
+        has_folder = any(f.folder_date for f in files)
+        has_any = has_filename or has_json or has_folder
 
         menu = QMenu(self._table)
         menu.addSection(f"{len(files)} file{'s' if len(files) != 1 else ''} selected")
@@ -363,6 +762,9 @@ class MainWindow(QMainWindow):
 
         act_js = menu.addAction("Apply JSON Date to Selected")
         act_js.setEnabled(has_json)
+
+        act_fd = menu.addAction("Apply Folder Date to Selected")
+        act_fd.setEnabled(has_folder)
 
         menu.addSeparator()
 
@@ -378,6 +780,8 @@ class MainWindow(QMainWindow):
             self._bulk_apply("filename", files)
         elif action == act_js:
             self._bulk_apply("json", files)
+        elif action == act_fd:
+            self._bulk_apply("folder", files)
         elif action == act_early:
             self._bulk_apply("earlier", files)
         elif action == act_late:
@@ -396,12 +800,16 @@ class MainWindow(QMainWindow):
             return file.filename_date.date_value if file.filename_date else None
         if source == "json":
             return file.json_date.date_value if file.json_date else None
+        if source == "folder":
+            return file.folder_date.date_value if file.folder_date else None
         # "earlier" / "later" — consider all available sources
         candidates: list[datetime] = []
         if file.filename_date:
             candidates.append(file.filename_date.date_value)
         if file.json_date:
             candidates.append(file.json_date.date_value)
+        if file.folder_date:
+            candidates.append(file.folder_date.date_value)
         if file.exif_date:
             candidates.append(file.exif_date)
         if not candidates:
@@ -441,13 +849,26 @@ class MainWindow(QMainWindow):
         labels = {
             "filename": "Filename Date",
             "json": "JSON Date",
+            "folder": "Folder Date",
             "earlier": "Earlier Date",
             "later": "Later Date",
         }
-        msg = f"Applied {labels[source]} to {applied} file(s)."
+        label = labels[source]
+        if applied == 0:
+            QMessageBox.information(
+                self, "Nothing Applied",
+                f"No selected files have a {label} available.\n"
+                "Select files with a date in the relevant column first."
+            )
+            return
+
+        msg = f"Applied {label} to {applied} file(s)."
         if skipped:
-            msg += f"  ({skipped} skipped — date not available or already has EXIF)"
+            msg += f"  ({skipped} skipped — source not available or already has EXIF.)"
         self._status_label.setText(msg)
+        # Remind user to click Apply Dates to write the dates to disk
+        if applied > 0:
+            self._apply_btn.setEnabled(True)
 
     # ── Settings ─────────────────────────────────────────────────────────────
 

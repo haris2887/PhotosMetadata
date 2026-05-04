@@ -139,6 +139,7 @@ class ConflictDialog(QDialog):
             "exif": "EXIF Date",
             "filename": "Filename Date",
             "google_json": "Google JSON Date",
+            "folder_path": "Folder Path Date",
         }
         label = type_labels.get(source.source_type, source.source_type)
         dt_str = source.date_value.strftime("%Y-%m-%d")

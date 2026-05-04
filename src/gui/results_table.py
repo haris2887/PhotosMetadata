@@ -12,7 +12,7 @@ from models.photo_file import PhotoFile
 from models.scan_result import ScanResult
 from utils.path_utils import get_relative_display_path
 
-_COLUMNS = ["File", "Type", "Status", "EXIF Date", "Filename Date", "JSON Date", "Chosen Date"]
+_COLUMNS = ["File", "Type", "Status", "EXIF Date", "Filename Date", "JSON Date", "Folder Date", "Chosen Date"]
 
 _STATUS_LABELS = {
     "has_exif":          "✅ Has EXIF",
@@ -80,6 +80,8 @@ class ResultsTableModel(QAbstractTableModel):
             if col == 5:
                 return _fmt_dt(file.json_date.date_value if file.json_date else None)
             if col == 6:
+                return _fmt_dt(file.folder_date.date_value if file.folder_date else None)
+            if col == 7:
                 return _fmt_dt(file.chosen_date)
 
         if role == Qt.ItemDataRole.ForegroundRole and col == 2:

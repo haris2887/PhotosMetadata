@@ -1,18 +1,28 @@
 # Legacy Codebase Analysis
 
 ## Summary
-Document findings from reviewing the original source code in /legacy/.
+The `/legacy/` directory contains the original prototype code that was used as a reference
+when designing the current application. The new codebase was written from scratch with a
+clean architecture rather than porting the legacy code directly.
 
-## Structure
-- [ ] Document original file layout
-- [ ] Identify core modules and their responsibilities
-- [ ] Note any external dependencies
+## Key Differences from Legacy
 
-## Pain Points
-- Deprecated API usage (e.g., `os.path` patterns)
-- No test coverage
-- Monolithic structure — logic mixed with UI
+| Aspect | Legacy | Current |
+|---|---|---|
+| Structure | Monolithic — logic mixed with UI | Strict core / GUI separation |
+| ExifTool access | Per-file subprocess calls | Persistent process via pyexiftool |
+| Testing | No test coverage | 128 unit tests (all passing); integration tests require ExifTool |
+| Date parsing | Single regex pass | 4-layer filename strategy + folder path extraction with confidence levels |
+| JSON sidecars | Not supported | Full Takeout support; 4-stage sidecar discovery; `_DirCache` for O(1) lookups |
+| Performance | Sequential per-file | Parallel enrichment via `ThreadPoolExecutor` (scales to multi-core) |
+| Error handling | Silent failures | Typed exception hierarchy; WriteResult per file |
+| GUI | — | PyQt6 with sortable table, conflict dialog, bulk resolve, "Move Missing…" |
 
-## Reuse Candidates
-- List any logic worth porting directly
-- Note any data formats or file structures to preserve compatibility with
+## Why a Rewrite
+- No test coverage made iteration risky
+- `os.path` patterns replaced with `pathlib.Path` throughout
+- Monolithic structure made adding features (JSON sidecar, conflict resolution) impractical
+- New architecture is fully testable without ExifTool or a display
+
+## Legacy Reference
+The legacy code is kept read-only in `/legacy/` for reference. Do not modify it.
