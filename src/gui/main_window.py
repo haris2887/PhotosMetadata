@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QStatusBar,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (
 from core.exif_writer import ExifWriter
 from core.exiftool_checker import check_exiftool
 from core.pipeline import ProcessingPipeline
+from gui.backup_window import BackupWindow
 from gui.conflict_dialog import ConflictDialog
 from gui.results_table import ResultsTableView
 from gui.scan_worker import ScanWorker
@@ -56,9 +58,41 @@ class MainWindow(QMainWindow):
         self._check_exiftool_on_startup()
 
     def _build_ui(self) -> None:
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
+        self._tabs = QTabWidget()
+        self.setCentralWidget(self._tabs)
+        self._tabs.addTab(self._build_organiser_tab(), "Photo Organiser")
+        self._tabs.addTab(BackupWindow(parent=self), "Photo Backups")
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
+        # ── Status bar ───────────────────────────────────────────────────────
+        self._status_bar = QStatusBar()
+        self.setStatusBar(self._status_bar)
+
+        self._status_label = QLabel("Ready")
+        self._status_bar.addWidget(self._status_label, stretch=1)
+
+        self._progress_count_label = QLabel("")
+        self._progress_count_label.setVisible(False)
+        self._status_bar.addPermanentWidget(self._progress_count_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMinimumWidth(220)
+        self._progress_bar.setMaximumWidth(300)
+        self._progress_bar.setTextVisible(True)
+        self._progress_bar.setVisible(False)
+        self._status_bar.addPermanentWidget(self._progress_bar)
+
+        self._root: Path | None = None
+
+    def _on_tab_changed(self, index: int) -> None:
+        self._status_label.setText("Ready")
+        self._progress_bar.setVisible(False)
+        self._progress_count_label.setVisible(False)
+
+    def _build_organiser_tab(self) -> QWidget:
+        """Return the Photo Organiser tab content (unchanged from original _build_ui)."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
@@ -120,25 +154,7 @@ class MainWindow(QMainWindow):
         self._table.customContextMenuRequested.connect(self._on_table_context_menu)
         layout.addWidget(self._table, stretch=1)
 
-        # ── Status bar ───────────────────────────────────────────────────────
-        self._status_bar = QStatusBar()
-        self.setStatusBar(self._status_bar)
-
-        self._status_label = QLabel("Ready")
-        self._status_bar.addWidget(self._status_label, stretch=1)
-
-        self._progress_count_label = QLabel("")
-        self._progress_count_label.setVisible(False)
-        self._status_bar.addPermanentWidget(self._progress_count_label)
-
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setMinimumWidth(220)
-        self._progress_bar.setMaximumWidth(300)
-        self._progress_bar.setTextVisible(True)
-        self._progress_bar.setVisible(False)
-        self._status_bar.addPermanentWidget(self._progress_bar)
-
-        self._root: Path | None = None
+        return tab
 
     # ── Startup ──────────────────────────────────────────────────────────────
 

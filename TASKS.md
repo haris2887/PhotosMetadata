@@ -18,6 +18,11 @@ _(nothing currently in progress)_
 - [ ] App icon — `.icns` (macOS) + `.ico` (Windows), pass via `icon=` in PyInstaller spec
 
 ## ✅ Done
+- [x] Photo Backups tab — full 6-stage pipeline (discover → hash sources → detect duplicates → discover dest → hash dest → compare); `BackupWindow`, `BackupTableModel`, `BackupWorker`, `CopyWorker`
+- [x] `FileHasher` — stdlib MD5 streaming in 64 KB chunks (no extra dependencies)
+- [x] `HashCache` — SQLite cache at `~/.photosmetadata/backup_hashes.db`; skips unchanged files by mtime+size; `clear_all()` for Force Re-Hash
+- [x] `MainWindow` refactored to `QTabWidget` (Photo Organiser + Photo Backups tabs)
+- [x] SSH source guidance built into BackupWindow (collapsed QGroupBox with WinFSP + SSHFS-Win links)
 - [x] `FolderDateParser` — 5-pass date extraction from folder path components (single full date → pair → triple → year+month → year-only)
 - [x] `folder_date` field added to `PhotoFile`; "Folder Date" column added to results table (between JSON Date and Chosen Date)
 - [x] Medium-confidence folder dates participate in `ConflictDialog` and `DateResolver` via `alternate_sources`
@@ -60,7 +65,7 @@ _(nothing currently in progress)_
 - [x] GUI: `MainWindow` — failed-write files moved to `_unwritable/` subfolder on user confirmation; JSON sidecars moved alongside
 - [x] GUI: `MainWindow` — "Move Missing…" toolbar button with destination picker and JSON co-move option
 - [x] `src/main.py` entry point
-- [x] 99 unit tests — all passing
+- [x] 153 unit tests — all passing
 - [x] Cross-platform setup scripts: `setup.sh`, `setup.bat`, `setup.ps1` (UTF-8 BOM fixed)
 - [x] Windows path display fixed — `get_relative_display_path` uses `.as_posix()`
 - [x] Repo pushed to GitHub: https://github.com/haris2887/PhotosMetadata

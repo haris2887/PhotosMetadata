@@ -11,7 +11,7 @@ clean architecture rather than porting the legacy code directly.
 |---|---|---|
 | Structure | Monolithic — logic mixed with UI | Strict core / GUI separation |
 | ExifTool access | Per-file subprocess calls | Persistent process via pyexiftool |
-| Testing | No test coverage | 128 unit tests (all passing); integration tests require ExifTool |
+| Testing | No test coverage | 153 unit tests (all passing); integration tests require ExifTool |
 | Date parsing | Single regex pass | 4-layer filename strategy + folder path extraction with confidence levels |
 | JSON sidecars | Not supported | Full Takeout support; 4-stage sidecar discovery; `_DirCache` for O(1) lookups |
 | Performance | Sequential per-file | Parallel enrichment via `ThreadPoolExecutor` (scales to multi-core) |

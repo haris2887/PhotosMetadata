@@ -23,6 +23,10 @@
 - 2026-05-02: `FolderDateParser` added (`src/core/folder_date_parser.py`) — 5-pass extraction of date from folder path components; confidence="medium" for full Y+M+D, "low" for year+month or year-only; folder_date field added to PhotoFile; "Folder Date" column added to results table; medium-confidence folder dates participate in conflict resolution via alternate_sources
 - 2026-05-02: dateutil fuzzy parser returns timezone-aware datetimes for filenames containing offset-like suffixes (e.g. `1W4A6781+1.jpg` → `+1` parsed as UTC+1) — fixed by calling `.replace(tzinfo=None)` on the dateutil result in `FilenameParser._dateutil_fallback()`
 - 2026-05-02: "Move Selected…" toolbar button added — moves any highlighted rows to a user-chosen folder with optional JSON co-move; identical dialog to "Move Missing…"; removes moved rows from table immediately; enabled after any scan with results
+- 2026-05-03: Photo Backups tab added — second tab in QTabWidget alongside existing Photo Organiser; scans multiple source dirs + destination, MD5-hashes all files (stdlib only, no new deps), detects cross-source duplicates, compares against destination; SQLite hash cache (~/.photosmetadata/backup_hashes.db) avoids rehashing unchanged files; "Force Re-Hash" clears cache; "Backup Unique Files" copies missing files preserving folder structure via shutil.copy2; SSH sources handled via SSHFS-Win mount (guidance built into UI with links to winfsp/sshfs-win releases)
+- 2026-05-03: Hash cache key is (path, mtime, size, algo) — changed files automatically rehash on next scan without explicit invalidation; algo stored for future-proofing
+- 2026-05-03: Duplicate detection groups source files by MD5 hash; first-seen is canonical; rest → status="duplicate" with duplicate_of pointer; only canonical copies are offered for backup
+- 2026-05-03: BackupWindow uses collapsed QGroupBox for SSH guidance to keep the UI uncluttered; two QLabel links open WinFSP and SSHFS-Win release pages via QDesktopServices.openUrl()
 
 ## What's Been Completed
 - [x] Project structure scaffolded (`src/`, `tests/`, `docs/`, `scripts/`, `legacy/`)
@@ -47,8 +51,10 @@
 - [x] GUI: `MainWindow` — "Move Selected…" toolbar button — moves highlighted rows + optional JSON sidecars to chosen folder
 - [x] `FolderDateParser` — 5-pass folder path date extraction; `folder_date` field on `PhotoFile`; "Folder Date" column in results table
 - [x] Bug fix: `FilenameParser` strips `tzinfo` from `dateutil` result — prevents crash on filenames with `+N` suffixes
+- [x] Photo Backups tab — `BackupPipeline`, `FileHasher`, `HashCache`, `BackupWindow`, `BackupTableModel`, `BackupWorker`, `CopyWorker`
+- [x] `MainWindow` refactored to `QTabWidget` (Tab 1: Photo Organiser, Tab 2: Photo Backups)
 - [x] `src/main.py` entry point
-- [x] 128 unit tests — all passing
+- [x] 153 unit tests — all passing
 - [x] Cross-platform setup scripts: `setup.sh`, `setup.bat`, `setup.ps1`
 - [x] Repo pushed to GitHub: https://github.com/haris2887/PhotosMetadata
 
@@ -60,4 +66,4 @@
 - Development on Windows 11, VS Code + Claude Code extension
 - GitHub repo: https://github.com/haris2887/PhotosMetadata (public)
 - Run the app: `.\.venv\Scripts\python.exe src/main.py` from project root
-- Run tests: `.\.venv\Scripts\python.exe -m pytest tests/unit/` (128 tests, no ExifTool needed)
+- Run tests: `.\.venv\Scripts\python.exe -m pytest tests/unit/` (153 tests, no ExifTool needed)

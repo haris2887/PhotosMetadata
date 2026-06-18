@@ -77,6 +77,66 @@
 - Colour-coded status: green (has_exif), orange (auto-resolved), purple (conflict), red (missing)
 - Multi-select with Ctrl/Shift; right-click on any row to open bulk resolve menu
 
+## Photo Backups Tab
+
+A second independent tab for verifying and performing photo backups. It answers:
+"Which of my photos are already on the backup drive, which need backing up, and which are
+duplicates across my source directories?"
+
+### Sources and Destination
+- Users add any number of **source directories** via "Add Source…" (directory picker)
+- One **destination directory** (the backup drive or folder) via "Browse…"
+- SSH/SFTP locations are supported by mounting them as local drives using
+  **WinFSP** + **SSHFS-Win** on Windows; no SSH library is required in the app.
+  The UI includes a collapsed "How to add an SSH source" section with links:
+  - WinFSP: https://github.com/winfsp/winfsp/releases
+  - SSHFS-Win: https://github.com/winfsp/sshfs-win/releases
+
+### 6-Stage Pipeline
+The pipeline runs on a background thread (`BackupWorker`) and reports progress through
+each stage via Qt signals:
+
+| Stage | Name | What happens |
+|---|---|---|
+| 1 | `discover_sources` | `FileScanner.scan()` for each source directory; builds list of `BackupFile` |
+| 2 | `hash_sources` | Parallel MD5 hashing of all source files; `HashCache` consulted first to skip unchanged files |
+| 3 | `detect_duplicates` | Group by hash; first-seen file is canonical ("pending"); all later occurrences → `status="duplicate"` |
+| 4 | `discover_dest` | `FileScanner.scan()` on the destination directory |
+| 5 | `hash_dest` | Parallel MD5 hashing of all destination files; builds `dict[hash → path]` |
+| 6 | `compare` | Non-duplicate source files: hash in dest → `"backed_up"`; otherwise → `"unique"` |
+
+### Hash Cache
+- Computed MD5 hashes are persisted to `~/.photosmetadata/backup_hashes.db` (SQLite)
+- Cache hit condition: `mtime`, `size`, and hash algorithm all match the stored row
+- Files that change on disk are automatically rehashed on the next scan (no manual invalidation needed)
+- **"Force Re-Hash"** button clears the entire cache and recomputes all hashes from scratch
+- The cache is shared across all sessions and all source/destination directories
+- Hashing algorithm: MD5 via Python stdlib `hashlib` (64 KB streaming chunks, ~600 MB/s,
+  zero extra dependencies)
+
+### Duplicate Detection
+- Two files with the same MD5 hash across any combination of source directories are considered duplicates
+- The first file encountered is the canonical copy ("pending" → resolves to "unique" or "backed_up")
+- All subsequent files with the same hash → `status="duplicate"` with a `duplicate_of` pointer
+- Only the canonical copy is included in the backup operation; duplicates are skipped
+
+### Results Table
+- Columns: File, Source Root, Size (MB), Status, Duplicate Of, Hash
+- Colour-coded status:
+  - Red (`unique`) — not in destination; will be copied by "Backup Unique Files"
+  - Green (`backed_up`) — MD5 already present in destination; no action needed
+  - Orange (`duplicate`) — same hash as another source file; shows which file is canonical
+  - Dark red (`error`) — hash or copy failed
+
+### Backup Copy
+- **"Backup Unique Files ▾"** (dropdown tool button):
+  - "Backup All Unique" — copies every `status="unique"` file
+  - "Backup Selected Rows" — copies only highlighted unique rows
+- Uses `shutil.copy2()` — preserves mtime, atime, and permissions
+- Preserves original relative folder structure under the destination
+  (e.g. `src/2020/vacation/img.jpg` → `dest/2020/vacation/img.jpg`)
+- Progress reported per file via `CopyWorker` Qt signals; table updates on completion
+
 ## Out of Scope (v1)
 - Exclude `_unwritable/` folder from subsequent scans of the parent directory
 - Filter / search bar above results table

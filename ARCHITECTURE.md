@@ -16,7 +16,8 @@ src/
 │
 ├── models/
 │   ├── photo_file.py            DateSource, PhotoFile, WriteResult dataclasses
-│   └── scan_result.py           ScanResult with computed properties
+│   ├── scan_result.py           ScanResult with computed properties
+│   └── backup_file.py           BackupFile, CopyResult, BackupResult dataclasses
 │
 ├── core/                        ← NO imports from src/gui/ allowed here
 │   ├── exceptions.py            ExifToolNotFoundError, ExifToolProcessError,
@@ -43,14 +44,31 @@ src/
 │   │                            • _DirCache: thread-safe bounded cache of _DirIndex (512 dirs)
 │   │                            • Cross-directory search for files moved to _unwritable/
 │   ├── resolver.py              DateResolver — 5 pure resolution rules
-│   └── pipeline.py              ProcessingPipeline.create(date_pref) — assembles all core
-│                                • Step 2: single ExifTool batch read (already optimal)
-│                                • Step 3: parallel enrichment via ThreadPoolExecutor
-│                                  min(32, cpu_count×2) threads — scales to i9/Ryzen 9
+│   ├── pipeline.py              ProcessingPipeline.create(date_pref) — assembles all core
+│   │                            • Step 2: single ExifTool batch read (already optimal)
+│   │                            • Step 3: parallel enrichment via ThreadPoolExecutor
+│   │                              min(32, cpu_count×2) threads — scales to i9/Ryzen 9
+│   ├── hasher.py                FileHasher.hash_file() — streaming MD5 in 64 KB chunks
+│   │                            • stdlib hashlib only; zero extra dependencies
+│   ├── hash_cache.py            HashCache — SQLite-backed mtime+size → MD5 hash lookup
+│   │                            • DB at ~/.photosmetadata/backup_hashes.db
+│   │                            • cache hit: mtime + size + algo all match
+│   │                            • thread-safe writes via threading.Lock
+│   │                            • clear_all() for "Force Re-Hash" button
+│   └── backup_pipeline.py       BackupPipeline — 6-stage backup comparison orchestrator
+│                                • Stage 1: discover_sources — FileScanner per source dir
+│                                • Stage 2: hash_sources — parallel FileHasher + HashCache
+│                                • Stage 3: detect_duplicates — group by hash; first = canonical
+│                                • Stage 4: discover_dest — FileScanner on destination
+│                                • Stage 5: hash_dest — parallel hash of destination files
+│                                • Stage 6: compare — unique vs backed_up per source file
+│                                • copy_unique() — shutil.copy2(), preserves relative_path tree
 │
 ├── gui/
 │   ├── app.py                   create_app() + main() — QApplication entry point
-│   ├── main_window.py           MainWindow (QMainWindow) — top-level controller
+│   ├── main_window.py           MainWindow (QMainWindow) — QTabWidget with two tabs
+│   │                            • Tab 1 "Photo Organiser": scan, conflict, write, move flows
+│   │                            • Tab 2 "Photo Backups": BackupWindow widget
 │   │                            • scan progress bar (file count + %)
 │   │                            • right-click bulk resolve (filename / JSON / folder / earliest / latest)
 │   │                            • backup toggle wired from SettingsDialog
@@ -61,8 +79,22 @@ src/
 │   ├── conflict_dialog.py       ConflictDialog — multi-file Prev/Next navigation
 │   ├── scan_worker.py           ScanWorker (QRunnable) — threaded pipeline run
 │   ├── write_worker.py          WriteWorker (QRunnable) — threaded batch write
-│   └── settings_dialog.py       SettingsDialog — ExifTool path, DMY/MDY pref,
-│                                 backup checkbox; all persisted via QSettings
+│   ├── settings_dialog.py       SettingsDialog — ExifTool path, DMY/MDY pref,
+│   │                            backup checkbox; all persisted via QSettings
+│   ├── backup_window.py         BackupWindow (QWidget) — self-contained Tab 2 content
+│   │                            • source list (QListWidget) with Add/Remove buttons
+│   │                            • collapsed SSH guidance QGroupBox with WinFSP +
+│   │                              SSHFS-Win links (QDesktopServices.openUrl)
+│   │                            • destination picker, Scan & Hash, Force Re-Hash,
+│   │                              Backup Unique Files ▾ (QToolButton with dropdown)
+│   ├── backup_table.py          BackupTableModel + BackupTableView
+│   │                            • columns: File, Source Root, Size (MB), Status,
+│   │                              Duplicate Of, Hash
+│   │                            • status colours: unique=red, backed_up=green,
+│   │                              duplicate=orange, error=dark-red
+│   └── backup_worker.py         BackupWorker(QRunnable) — runs BackupPipeline.run()
+│                                • force_rehash=True calls HashCache.clear_all() first
+│                                CopyWorker(QRunnable) — runs BackupPipeline.copy_unique()
 │
 └── utils/
     ├── date_utils.py            datetime ↔ EXIF string, dates_within_hours
@@ -132,6 +164,59 @@ ScanResult emitted to MainWindow (via Qt signal from ScanWorker)
 
 ---
 
+## Backup Data Flow
+
+```
+User sets source dirs + destination dir
+        │
+        ▼
+Stage 1 — discover_sources
+  FileScanner.scan(root) for each source directory
+        │  list[BackupFile]  (status="pending")
+        ▼
+Stage 2 — hash_sources
+  ThreadPoolExecutor (min(32, cpu×2) threads)
+    per file: HashCache.get(path, mtime, size)
+      └─ cache hit  → reuse stored MD5
+      └─ cache miss → FileHasher.hash_file()
+                        └─ HashCache.put(path, mtime, size, hash)
+        │  BackupFile.hash_value set on all files
+        ▼
+Stage 3 — detect_duplicates
+  Group source files by hash value
+  First occurrence → remains "pending"
+  Later occurrences → status="duplicate", duplicate_of=canonical_path
+        │
+        ▼
+Stage 4 — discover_dest
+  FileScanner.scan(destination)
+        │  list[Path]  (destination files)
+        ▼
+Stage 5 — hash_dest
+  Same parallel HashCache + FileHasher pattern
+  Result: dict[hash → dest_path]
+        │
+        ▼
+Stage 6 — compare
+  For each non-duplicate source file:
+    hash in dest_hashes → status="backed_up"
+    hash not in dest_hashes → status="unique"
+        │
+        ▼
+BackupResult emitted to BackupWindow (via Qt signal from BackupWorker)
+        │
+        ├─► BackupTableView updated
+        │   (colour-coded: red=unique, green=backed_up, orange=duplicate, dark-red=error)
+        │
+        └─► [user clicks "Backup Unique Files"]
+              CopyWorker calls BackupPipeline.copy_unique()
+                shutil.copy2(source, dest / relative_path)
+                Creates destination subdirectories as needed
+                Preserves mtime, atime, permissions
+```
+
+---
+
 ## GoogleJsonReader: Sidecar Discovery (4-Stage Search)
 
 Each stage is attempted in order; the first match wins. Stages 3–4 use the
@@ -180,6 +265,18 @@ the `_unwritable` prefix) to find sidecars left behind when only the image was m
 - `WriteWorker` (QRunnable) calls `ExifWriter.write_batch()` on a single Qt thread-pool thread
 - ExifTool handles all parallelism internally via its argfile batch strategy
 
+### Backup scan phase
+- `BackupWorker` (QRunnable) runs `BackupPipeline.run()` on a Qt thread-pool thread
+- Inside `run()`, `ThreadPoolExecutor` spawns `min(32, cpu_count×2)` worker threads for
+  hashing source files (stages 2 and 5) — same I/O-bound heuristic as the organiser scan
+- `HashCache` writes are serialised by a `threading.Lock`; reads are lock-free (race harmless)
+- `BackupResult` is passed as a single completed object to the main thread
+
+### Backup copy phase
+- `CopyWorker` (QRunnable) runs `BackupPipeline.copy_unique()` on a Qt thread-pool thread
+- Copy is sequential (`shutil.copy2`) — I/O-bound but destination write serialisation
+  is usually the bottleneck, so parallelism would not help
+
 ### Cross-thread communication
 - All GUI updates use **Qt queued signals only** — thread-safe by design
 - `ScanResult` is passed as a single completed object to the main thread — no shared mutable state after delivery
@@ -202,6 +299,12 @@ the `_unwritable` prefix) to find sidecars left behind when only the image was m
 | OtherImageStart retry | Binary patch then second ExifTool pass | Strips only the corrupt secondary-image IFD; primary image untouched |
 | Install | `pip install -r requirements.txt` | No build backend — works on all Python installs including Windows Store |
 | Compatibility | `from __future__ import annotations` | Runs on Python 3.9+ despite using `X \| Y` syntax |
+| Hash algorithm | MD5 via stdlib `hashlib` | Fast (~600 MB/s); zero extra dependencies; adequate for deduplication (not used for security) |
+| Hash persistence | SQLite `~/.photosmetadata/backup_hashes.db` | Avoids rehashing unchanged files; single shared DB for all sources; stdlib `sqlite3` |
+| Hash cache key | `(path, mtime, size, algo)` | Files that change on disk are automatically detected and rehashed without explicit invalidation |
+| Backup copy | `shutil.copy2` preserving `relative_path` | Reproduces original folder structure in destination; preserves mtime/atime/permissions |
+| SSH source support | WinFSP + SSHFS-Win mounted as local drive | No SSH library needed; any local-path tool (scanner, hasher) works transparently |
+| Tab layout | `QTabWidget` with Photo Organiser + Photo Backups | Clean separation; each tab is a self-contained QWidget; status bar stays visible across tabs |
 
 ---
 
